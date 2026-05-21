@@ -28,6 +28,9 @@ Makefile.user
 
 # CMake
 build
+build-windows-*
+amule-portable-*
+dist/
 
 # AI coding assistants
 *.local.md
