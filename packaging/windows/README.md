@@ -24,9 +24,8 @@ packaging/windows/build.sh
 ```
 
 `packaging/windows/build.sh` reads `packaging/windows/versions.env` for
-the target MSYSTEM and signing secrets, then drives cmake + ninja +
-zip. Each invocation is idempotent; reuses `build-windows-<arch>/` if
-present.
+the target MSYSTEM and signing secrets, then drives cmake + MinGW Makefiles +
+zip. Each invocation is idempotent; reuses `build-windows-<arch>/` if present.
 
 ## Driving over SSH
 
@@ -55,8 +54,8 @@ in PATH would silently produce a working but mis-arch'd binary).
 
 ## What the recipe does
 
-1. cmake configure with `-G Ninja -DCMAKE_BUILD_TYPE=Release` and the
-   six `BUILD_*` flags aMule's portable shipper needs.
+1. cmake configure with `-G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release`
+   and the six `BUILD_*` flags aMule's portable shipper needs.
 2. `cmake --install --prefix amule-portable-<arch>` produces a working
    tree with `bin/{amule,amuled,amulegui,amulecmd,ed2k}.exe` plus
    bundled MSYS2 DLLs (resolved via `file(GET_RUNTIME_DEPENDENCIES)`)
