@@ -28,6 +28,9 @@ Makefile.user
 
 # CMake
 build
+build-windows-*
+amule-portable-*
+dist/
 
 # Windows installer build artifacts
 packaging/windows/installer_strings_generated.nsh
