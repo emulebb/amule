@@ -1,0 +1,217 @@
+# Nightly upstream sync - rebases the eMuleBB aMule fork only when upstream
+# moved, builds the requested packaging tracks, and publishes a prerelease.
+
+name: Nightly upstream sync
+
+on:
+  schedule:
+    # GitHub schedules run in UTC. Use an off-hour minute to avoid the
+    # top-of-hour global Actions queue spike.
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build and publish even when upstream has not moved.
+        required: false
+        type: boolean
+        default: false
+      tracks:
+        description: >-
+          Comma-separated packaging tracks. Default covers Windows plus Linux.
+          Valid: windows, appimage, flatpak, macos.
+        required: false
+        type: string
+        default: 'windows,appimage,flatpak'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: amule-nightly-upstream
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Check upstream and prepare rebased ref
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
+      build_ref: ${{ steps.prepare.outputs.build_ref }}
+      nightly_tag: ${{ steps.prepare.outputs.nightly_tag }}
+      origin_master_sha: ${{ steps.prepare.outputs.origin_master_sha }}
+      upstream_sha: ${{ steps.prepare.outputs.upstream_sha }}
+      tracks: ${{ steps.prepare.outputs.tracks }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: master
+
+      - name: Rebase fork branch when upstream changed
+        id: prepare
+        env:
+          FORCE: ${{ inputs.force || false }}
+          TRACKS: ${{ inputs.tracks || 'windows,appimage,flatpak' }}
+        run: |
+          set -euo pipefail
+          git config user.name "eMuleBB automation"
+          git config user.email "actions@users.noreply.github.com"
+          git remote add upstream https://github.com/amule-project/amule.git
+          git fetch origin master --tags
+          git fetch origin automation/upstream-nightly || true
+          git fetch upstream master --tags
+
+          ORIGIN_MASTER_SHA="$(git rev-parse origin/master)"
+          UPSTREAM_SHA="$(git rev-parse upstream/master)"
+          TRACKS="${TRACKS:-windows,appimage,flatpak}"
+
+          echo "origin/master: ${ORIGIN_MASTER_SHA}"
+          echo "upstream/master: ${UPSTREAM_SHA}"
+          echo "tracks: ${TRACKS}"
+
+          if [[ "${FORCE}" != "true" ]] && git merge-base --is-ancestor "${UPSTREAM_SHA}" origin/master; then
+              echo "No new upstream commits since master was last published."
+              {
+                  echo "changed=false"
+                  echo "origin_master_sha=${ORIGIN_MASTER_SHA}"
+                  echo "upstream_sha=${UPSTREAM_SHA}"
+                  echo "tracks=${TRACKS}"
+              } >> "${GITHUB_OUTPUT}"
+              exit 0
+          fi
+
+          git checkout -B automation/upstream-nightly origin/master
+          git rebase upstream/master
+
+          SHORT_UPSTREAM="${UPSTREAM_SHA:0:8}"
+          NIGHTLY_TAG="amule-nightly-$(date -u +%Y%m%d)-${SHORT_UPSTREAM}"
+          git tag -f "${NIGHTLY_TAG}"
+          git push origin HEAD:refs/heads/automation/upstream-nightly --force-with-lease
+          git push origin "refs/tags/${NIGHTLY_TAG}" --force
+
+          {
+              echo "changed=true"
+              echo "build_ref=refs/tags/${NIGHTLY_TAG}"
+              echo "nightly_tag=${NIGHTLY_TAG}"
+              echo "origin_master_sha=${ORIGIN_MASTER_SHA}"
+              echo "upstream_sha=${UPSTREAM_SHA}"
+              echo "tracks=${TRACKS}"
+          } >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build nightly packages
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    uses: ./.github/workflows/packaging.yml
+    with:
+      only: ${{ needs.prepare.outputs.tracks }}
+      checkout_ref: ${{ needs.prepare.outputs.build_ref }}
+
+  publish-master:
+    name: Publish rebased master
+    needs:
+      - prepare
+      - build
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.build_ref }}
+
+      - name: Update master after green build
+        run: |
+          set -euo pipefail
+          git push origin \
+              "HEAD:refs/heads/master" \
+              --force-with-lease="refs/heads/master:${{ needs.prepare.outputs.origin_master_sha }}"
+
+  cleanup-failed-build:
+    name: Remove failed nightly tag
+    needs:
+      - prepare
+      - build
+      - publish-master
+    if: >-
+      always() &&
+      needs.prepare.outputs.changed == 'true' &&
+      (needs.build.result != 'success' || needs.publish-master.result != 'success')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Delete tag for failed nightly
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.nightly_tag }}
+        run: |
+          set -euo pipefail
+          gh api \
+              --method DELETE \
+              "repos/${{ github.repository }}/git/refs/tags/${TAG}" || true
+
+  release:
+    name: Publish nightly prerelease
+    needs:
+      - prepare
+      - build
+      - publish-master
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.build_ref }}
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: downloaded
+
+      - name: Stage release artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find downloaded -maxdepth 4 -type f \
+              \( -name '*.zip' -o -name '*.AppImage' -o -name '*.flatpak' -o -name '*.dmg' \) \
+              -print -exec cp '{}' dist/ \;
+          ls -la dist
+
+      - name: Publish or refresh prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.nightly_tag }}
+          UPSTREAM_SHA: ${{ needs.prepare.outputs.upstream_sha }}
+          TRACKS: ${{ needs.prepare.outputs.tracks }}
+        run: |
+          set -euo pipefail
+          NOTES="$(mktemp)"
+          {
+              echo "Automated eMuleBB aMule nightly built after upstream moved."
+              echo
+              echo "Upstream master: ${UPSTREAM_SHA}"
+              echo "Build ref: ${TAG}"
+              echo "Tracks: ${TRACKS}"
+              echo
+              echo "This prerelease is generated by the scheduled upstream sync workflow."
+          } > "${NOTES}"
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+              gh release upload "${TAG}" dist/* --clobber
+              gh release edit "${TAG}" --title "aMule nightly ${TAG}" --notes-file "${NOTES}" --prerelease
+          else
+              gh release create "${TAG}" \
+                  --title "aMule nightly ${TAG}" \
+                  --notes-file "${NOTES}" \
+                  --prerelease \
+                  dist/*
+          fi
+
+  no-change:
+    name: No upstream changes
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'false'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "No upstream changes; nightly build and release skipped."
