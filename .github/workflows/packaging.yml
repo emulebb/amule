@@ -40,11 +40,22 @@ on:
         required: false
         type: string
         default: ''
+      checkout_ref:
+        description: >-
+          Optional git ref to check out for packaging. Defaults to the
+          workflow ref. Used by upstream nightly automation.
+        required: false
+        type: string
+        default: ''
   # Lets release.yml invoke this matrix as a reusable workflow on tag
   # pushes — same artifact set, no duplication of the build steps.
   workflow_call:
     inputs:
       only:
+        required: false
+        type: string
+        default: ''
+      checkout_ref:
         required: false
         type: string
         default: ''
@@ -74,6 +85,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # for git describe in build.sh
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - name: Build AppImage
         run: packaging/linux/build.sh appimage
       - name: Validate via cross-distro Docker matrix
@@ -83,6 +95,7 @@ jobs:
           name: appimage-${{ matrix.arch }}
           path: dist/aMule-*-${{ matrix.arch }}.AppImage
           if-no-files-found: error
+          retention-days: 3
 
   # ------------------------------------------------------------------
   # Linux — Flatpak on x86_64 + aarch64 native runners
@@ -113,6 +126,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - name: Install flatpak + flatpak-builder + GNOME runtime
         run: |
           sudo apt-get update
@@ -132,6 +146,7 @@ jobs:
           name: flatpak-${{ matrix.arch }}
           path: dist/aMule-*-${{ matrix.arch }}.flatpak
           if-no-files-found: error
+          retention-days: 3
 
   # ------------------------------------------------------------------
   # macOS — native arm64 + x86_64 builds, then lipo-merge to Universal2
@@ -166,6 +181,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - name: Bootstrap x86_64 Homebrew (Rosetta)
         if: matrix.arch == 'x86_64'
         run: |
@@ -243,6 +259,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - uses: actions/download-artifact@v8
         with:
           name: macos-app-arm64
@@ -344,6 +362,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - name: Set up MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -402,3 +421,4 @@ jobs:
           name: windows-${{ matrix.arch }}
           path: dist/aMule-*-Windows-${{ matrix.arch }}.zip
           if-no-files-found: error
+          retention-days: 3
