@@ -78,8 +78,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64,  runs-on: ubuntu-22.04 }
-          - { arch: aarch64, runs-on: ubuntu-22.04-arm }
+          - { arch: x86_64,  artifact_arch: x64,   runs-on: ubuntu-22.04 }
+          - { arch: aarch64, artifact_arch: arm64, runs-on: ubuntu-22.04-arm }
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v6
@@ -93,7 +93,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: appimage-${{ matrix.arch }}
-          path: dist/aMule-*-${{ matrix.arch }}.AppImage
+          path: dist/aMule-*-Linux-${{ matrix.artifact_arch }}.AppImage
           if-no-files-found: error
           retention-days: 3
 
@@ -119,8 +119,8 @@ jobs:
         # inside the GNOME Platform sandbox), so bumping the runner
         # has no compat downside, unlike the AppImage matrix.
         include:
-          - { arch: x86_64,  runs-on: ubuntu-24.04 }
-          - { arch: aarch64, runs-on: ubuntu-24.04-arm }
+          - { arch: x86_64,  artifact_arch: x64,   runs-on: ubuntu-24.04 }
+          - { arch: aarch64, artifact_arch: arm64, runs-on: ubuntu-24.04-arm }
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v6
@@ -144,7 +144,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: flatpak-${{ matrix.arch }}
-          path: dist/aMule-*-${{ matrix.arch }}.flatpak
+          path: dist/aMule-*-Linux-${{ matrix.artifact_arch }}.flatpak
           if-no-files-found: error
           retention-days: 3
 
