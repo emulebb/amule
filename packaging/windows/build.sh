@@ -11,7 +11,7 @@ usage() {
     cat >&2 <<EOF
 usage: $0 [build|installer|sign]
 
-  build      default action: cmake configure → build → install portable tree →
+  build      default action: cmake configure, build, install portable tree, and
              zip into dist/. Idempotent; reuses existing build/ if present.
   installer  build the NSIS installer .exe on top of an already-staged
              portable tree (run \`$0\` first). Idempotent.
@@ -48,9 +48,25 @@ case "${WINDOWS_MSYSTEM}" in
     *) echo "fatal: unsupported WINDOWS_MSYSTEM=${WINDOWS_MSYSTEM}" >&2; exit 1 ;;
 esac
 
-BUILD_DIR="${REPO_ROOT}/build-windows-${ARCH}"
-PORTABLE_DIR="${REPO_ROOT}/amule-portable-${ARCH}"
-DIST_DIR="${REPO_ROOT}/dist"
+to_msys_path() {
+    local value="$1"
+    if command -v cygpath >/dev/null && [[ "${value}" =~ ^[A-Za-z]:[\\/] ]]; then
+        cygpath -u "${value}"
+    else
+        printf '%s\n' "${value}"
+    fi
+}
+
+if [[ -n "${EMULEBB_WORKSPACE_OUTPUT_ROOT:-}" ]]; then
+    OUTPUT_ROOT="$(to_msys_path "${EMULEBB_WORKSPACE_OUTPUT_ROOT}")"
+    BUILD_DIR="${OUTPUT_ROOT}/builds/amule/windows-${ARCH}"
+    PORTABLE_DIR="${OUTPUT_ROOT}/builds/amule/amule-portable-${ARCH}"
+    DIST_DIR="${OUTPUT_ROOT}/release/amule"
+else
+    BUILD_DIR="${REPO_ROOT}/build-windows-${ARCH}"
+    PORTABLE_DIR="${REPO_ROOT}/amule-portable-${ARCH}"
+    DIST_DIR="${REPO_ROOT}/dist"
+fi
 mkdir -p "${DIST_DIR}"
 
 VERSION=$(cd "${REPO_ROOT}" && git describe --tags --always 2>/dev/null || echo "snapshot")
