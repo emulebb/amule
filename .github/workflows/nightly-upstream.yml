@@ -61,7 +61,9 @@ jobs:
           set -euo pipefail
           git config user.name "eMuleBB automation"
           git config user.email "actions@users.noreply.github.com"
-          git remote add upstream https://github.com/amule-project/amule.git
+          # aMule development moved to the amule-org organization after the
+          # amule-project owner became unreachable; track the active upstream.
+          git remote add upstream https://github.com/amule-org/amule.git
           git fetch origin master --tags
           git fetch origin automation/upstream-nightly || true
           git fetch upstream master --tags
@@ -99,15 +101,23 @@ jobs:
               exit 0
           fi
 
+          # .github/workflows is fork-owned. Auto-resolve any workflow-file
+          # conflict during the rebase to the in-progress side so the rebase
+          # never aborts on them (the ownership-restore step below overwrites
+          # them from origin/master regardless of which side wins here).
+          git config merge.ours.driver true
+          printf '%s\n' '.github/workflows/** merge=ours' >> .git/info/attributes
           git checkout -B automation/upstream-nightly origin/master
           git rebase upstream/master
-          if [[ -n "${UPSTREAM_WORKFLOW_CHANGES}" ]]; then
-              git rm -r --quiet .github/workflows || true
-              git checkout origin/master -- .github/workflows
-              if ! git diff --cached --quiet -- .github/workflows || ! git diff --quiet -- .github/workflows; then
-                  git add .github/workflows
-                  git commit -m "CI-042 preserve eMuleBB workflow ownership"
-              fi
+          # Always restore fork-owned workflows from origin/master after the
+          # rebase, regardless of whether upstream touched them. This keeps the
+          # published ref carrying eMuleBB CI even when a workflow conflict was
+          # auto-resolved to the upstream side above.
+          git rm -r --quiet .github/workflows || true
+          git checkout origin/master -- .github/workflows
+          if ! git diff --cached --quiet -- .github/workflows || ! git diff --quiet -- .github/workflows; then
+              git add .github/workflows
+              git commit -m "CI-042 preserve eMuleBB workflow ownership"
           fi
 
           SHORT_UPSTREAM="${UPSTREAM_SHA:0:8}"
