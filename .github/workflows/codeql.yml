@@ -14,18 +14,14 @@ name: "CodeQL Advanced"
 on:
   push:
     branches: [ "master" ]
-  # pull_request trigger intentionally omitted: a merged PR is just a push to
-  # master, so the push trigger above already covers it.
-  # Note: without a pull_request trigger, GitHub will not post a "Code scanning"
-  # status check on open PRs. If branch protection rules require that check,
-  # re-add the pull_request trigger.
+  pull_request:
+    branches: [ "master" ]
   schedule:
     - cron: "30 21 * * 4"
 
 env:
   # The minus sign removes the trailing new line in the last line
   cmake_ubuntu_deps: |-
-    binutils-dev \
     build-essential \
     cmake \
     gettext \
@@ -106,7 +102,7 @@ jobs:
           # your codebase is analyzed, see https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
 
       # Add any setup steps before running the `github/codeql-action/init` action.
       # This includes steps like installing compilers or runtimes (`actions/setup-node`
