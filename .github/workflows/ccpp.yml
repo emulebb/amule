@@ -3,38 +3,18 @@ name: C/C++ CI
 on:
   push:
     branches: [ "**" ]
-    paths:
-      - 'src/**'
-      - 'cmake/**'
-      - 'CMakeLists.txt'
-      - 'unittests/**'
-      - 'po/**'
-      - 'config.h.cm'
-      - '.github/workflows/ccpp.yml'
   pull_request:
     branches: [ "**" ]
-    paths:
-      - 'src/**'
-      - 'cmake/**'
-      - 'CMakeLists.txt'
-      - 'unittests/**'
-      - 'po/**'
-      - 'config.h.cm'
-      - '.github/workflows/ccpp.yml'
 
 permissions:
   contents: read
   pull-requests: write
 
 env:
-  CCACHE_DIR: ${{ github.workspace }}/.ccache
-  CCACHE_MAXSIZE: 500M
-
   # The minus sign removes the trailing new line in the last line
   cmake_ubuntu_deps: |-
     binutils-dev \
     build-essential \
-    ccache \
     cmake \
     gettext \
     libboost-all-dev \
@@ -50,7 +30,6 @@ env:
 
   cmake_macos_deps: |-
     boost \
-    ccache \
     cryptopp \
     gd \
     gettext \
@@ -61,7 +40,6 @@ env:
 
   cmake_mingw_w64_deps: |
     mingw-w64-x86_64-boost
-    mingw-w64-x86_64-ccache
     mingw-w64-x86_64-cmake
     mingw-w64-x86_64-crypto++
     mingw-w64-x86_64-gettext
@@ -117,13 +95,7 @@ jobs:
       matrix:
         build_type: [Debug, Release]
     steps:
-      - uses: actions/checkout@v7
-      - name: restore ccache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-${{ matrix.build_type }}-ccache-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.build_type }}-ccache-
+      - uses: actions/checkout@v6
       - name: install deps
         run: |
           sudo apt-get update
@@ -138,19 +110,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             ${{ env.cmake_common_config_flags }} \
             ${{ env.cmake_ubuntu_config_flags }}
-      - name: zero ccache stats
-        run: ccache --zero-stats
       - name: make
         run: cmake --build build
-      - name: save ccache
-        uses: actions/cache/save@v6
-        if: always()
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-${{ matrix.build_type }}-ccache-${{ github.run_id }}
-      - name: ccache stats
-        if: always()
-        run: ccache --show-stats
       - name: run tests
         run: ctest ${{ env.ctest_flags }}
 
@@ -162,13 +123,7 @@ jobs:
       matrix:
         build_type: [Debug, Release]
     steps:
-      - uses: actions/checkout@v7
-      - name: restore ccache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-${{ matrix.build_type }}-ccache-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.build_type }}-ccache-
+      - uses: actions/checkout@v6
       - name: install deps
         run: |
           brew update
@@ -189,19 +144,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             ${{ env.cmake_common_config_flags }} \
             ${{ env.cmake_macos_config_flags }}
-      - name: zero ccache stats
-        run: ccache --zero-stats
       - name: make
         run: cmake --build build
-      - name: save ccache
-        uses: actions/cache/save@v6
-        if: always()
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-${{ matrix.build_type }}-ccache-${{ github.run_id }}
-      - name: ccache stats
-        if: always()
-        run: ccache --show-stats
       - name: run tests
         run: ctest ${{ env.ctest_flags }}
 
@@ -216,13 +160,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v7
-      - name: restore ccache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-${{ matrix.build_type }}-ccache-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.build_type }}-ccache-
+      - uses: actions/checkout@v6
       - name: set up MSYS2 mingw-w64
         uses: msys2/setup-msys2@v2
         with:
@@ -235,18 +173,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             ${{ env.cmake_common_config_flags }} \
             ${{ env.cmake_mingw_w64_config_flags }}
-      - name: zero ccache stats
-        run: ccache --zero-stats
       - name: make
         run: cmake --build build
-      - name: save ccache
-        uses: actions/cache/save@v6
-        if: always()
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-${{ matrix.build_type }}-ccache-${{ github.run_id }}
-      - name: ccache stats
-        if: always()
-        run: ccache --show-stats
       - name: run tests
         run: ctest ${{ env.ctest_flags }}
