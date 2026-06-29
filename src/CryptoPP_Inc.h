@@ -37,7 +37,9 @@
 
 #include CRYPTO_HEADER(config.h)
 #include CRYPTO_HEADER(md4.h)
+#include CRYPTO_HEADER(md5.h)
 #include CRYPTO_HEADER(rsa.h)
+#include CRYPTO_HEADER(sha.h)
 #include CRYPTO_HEADER(base64.h)
 #include CRYPTO_HEADER(osrng.h)
 #include CRYPTO_HEADER(files.h)

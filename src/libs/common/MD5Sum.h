@@ -26,6 +26,19 @@ documentation and/or software.
 #ifndef MD5SUM_H
 #define MD5SUM_H
 
+#include "../../CryptoPP_Inc.h"
+
+#define MD5_DIGEST_SIZE 16
+
+// Crypto::Weak::MD5 needs CRYPTOPP_ENABLE_NAMESPACE_WEAK which
+// has already been declared in CryptoPP_Inc.h header, where other
+// weak crypto algorithms (e.g. MD4) are also included
+
+typedef struct
+{
+	uint8 b[MD5_DIGEST_SIZE];
+} MD5Digest;
+
 class MD5Sum
 {
 public:
@@ -37,11 +50,11 @@ public:
 	void Calculate(const uint8 *buffer, size_t len);
 
 	wxString GetHash();
-	const uint8 *GetRawHash() const { return m_rawhash; }
+	const uint8 *GetRawHash() const { return m_hash.b; }
 
 private:
 	wxString m_sHash;
-	uint8 m_rawhash[16];
+	MD5Digest m_hash;
 };
 
 #endif // MD5SUM_H
