@@ -217,6 +217,23 @@ public:
 	static const wxString &GetConfigDir() { return s_configDir; }
 	static void SetConfigDir(const wxString &dir) { s_configDir = dir; }
 
+	// True when this process started without an existing
+	// preferences.dat, i.e. a fresh install / first launch. Captured
+	// once in the CPreferences constructor (before the file is
+	// created) so the first-run setup wizard can be shown exactly
+	// once. Always false in the remote GUI, which has no local config.
+	static bool IsFirstRun() { return s_firstRun; }
+
+	// True once the first-run setup wizard has actually been completed
+	// (the user pressed Finish). Unlike IsFirstRun(), which is merely
+	// inferred from the absence of preferences.dat, this is an explicit
+	// persisted flag (/eMule/FirstRunWizardDone, written in
+	// FirstRunWizard::Apply): it distinguishes a completed run from a
+	// cancelled one and lets the wizard be re-triggered simply by
+	// clearing the flag. Always false in the remote GUI.
+	static bool IsFirstRunWizardDone() { return s_firstRunWizardDone; }
+	static void SetFirstRunWizardDone(bool val) { s_firstRunWizardDone = val; }
+
 	static bool Score() { return s_scorsystem; }
 	static void SetScoreSystem(bool val) { s_scorsystem = val; }
 	static bool Reconnect() { return s_reconnect; }
@@ -282,6 +299,10 @@ public:
 
 	static uint32 GetMaxDownload() { return s_maxdownload; }
 	static uint16 GetMaxConnections() { return s_maxconnections; }
+	// OS-aware ceiling for the connection count (accounts for the
+	// half-open-connection limit on legacy Windows). Used as the default
+	// MaxConnections and to clamp the first-run wizard's derived limits.
+	static int32 GetRecommendedMaxConnections();
 	static uint16 GetMaxSourcePerFile() { return s_maxsourceperfile; }
 	static uint16 GetMaxSourcePerFileSoft()
 	{
@@ -711,8 +732,6 @@ public:
 	static void SetPreventSleepWhileDownloading(bool status) { s_preventSleepWhileDownloading = status; }
 
 protected:
-	static int32 GetRecommendedMaxConnections();
-
 	//! Temporary storage for statistic-colors.
 	static unsigned long s_colors[cntStatColors];
 	//! Reference for checking if the colors has changed.
@@ -732,6 +751,8 @@ private:
 
 protected:
 	static wxString s_configDir;
+	static bool s_firstRun;
+	static bool s_firstRunWizardDone;
 
 	////////////// USER
 	static wxString s_nick;

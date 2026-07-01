@@ -36,7 +36,10 @@
 
 #include <wx/cmdline.h> // Needed for wxCmdLineParser
 #ifndef AMULE_DAEMON
-#include <wx/choicdlg.h> // Needed for wxMultiChoiceDialog (GUI-only)
+#include <wx/dialog.h>   // Needed for the bootstrap dialog (GUI-only)
+#include <wx/sizer.h>    // Needed for wxBoxSizer (GUI-only)
+#include <wx/stattext.h> // Needed for wxStaticText (GUI-only)
+#include <wx/checkbox.h> // Needed for wxCheckBox (GUI-only)
 #endif
 #include <wx/config.h> // Do_not_auto_remove (win32)
 #include <wx/fileconf.h>
@@ -54,7 +57,9 @@
 #include <glib.h> // g_set_prgname() — wl_app_id / WM_CLASS binding
 #endif
 
-#include <common/Format.h> // Needed for CFormat
+#include <common/Format.h>          // Needed for CFormat
+#include <common/DataFileVersion.h> // Needed for MET_HEADER (server.met probe)
+#include "CFile.h"                  // Needed for CFile (server.met probe)
 #include "kademlia/kademlia/Kademlia.h"
 #include "kademlia/kademlia/Prefs.h"
 #include "kademlia/kademlia/UDPFirewallTester.h"
@@ -108,6 +113,7 @@
 #include <wx/msgdlg.h>
 
 #include "amuleDlg.h"
+#include "FirstRunWizard.h" // Needed for the first-run setup wizard (GUI-only)
 #endif
 
 #ifdef HAVE_SYS_RESOURCE_H
@@ -444,6 +450,33 @@ int CamuleApp::InitGui(bool, wxString &)
 	return 0;
 }
 
+// Probe server.met for actual server entries rather than mere existence.
+// ~CServerList() calls SaveServerMet() unconditionally whenever eD2k is
+// enabled, so a cancelled first run with zero servers still leaves a
+// valid-but-empty file (header 0xE0 + a uint32 count of 0). Checking the
+// count — not just the file — is what keeps the bootstrap page from
+// re-offering the download after such a run. The header/count layout
+// mirrors CServerList::SaveServerMet().
+static bool ServerMetHasServers(const wxString &path)
+{
+	if (!wxFileExists(path)) {
+		return false;
+	}
+	try {
+		CFile file(path, CFile::read);
+		if (!file.IsOpened()) {
+			return false;
+		}
+		uint8_t version = file.ReadUInt8();
+		if (version != 0xE0 && version != MET_HEADER) {
+			return false;
+		}
+		return file.ReadUInt32() > 0;
+	} catch (const CSafeIOException &) {
+		return false;
+	}
+}
+
 //
 // Application initialization
 //
@@ -523,19 +556,9 @@ bool CamuleApp::OnInit()
 
 	glob_prefs = new CPreferences();
 
-	CPath outDir;
-	if (CheckMuleDirectory("temp", thePrefs::GetTempDir(), thePrefs::GetConfigDir() + "Temp", outDir)) {
-		thePrefs::SetTempDir(outDir);
-	} else {
-		return false;
-	}
-
-	if (CheckMuleDirectory(
-		    "incoming", thePrefs::GetIncomingDir(), thePrefs::GetConfigDir() + "Incoming", outDir)) {
-		thePrefs::SetIncomingDir(outDir);
-	} else {
-		return false;
-	}
+	// The temp / incoming directories are validated and created further
+	// down, after the first-run wizard has had a chance to point them
+	// somewhere else.
 
 	// Initialize wx sockets (needed for http download in background with Asio sockets)
 	wxSocketBase::Initialize();
@@ -649,6 +672,52 @@ bool CamuleApp::OnInit()
 
 		vfile.Write();
 		vfile.Close();
+	}
+
+	// First launch: run the guided setup wizard before the network
+	// stack comes up, so the chosen ports, enabled networks and UPnP
+	// setting take effect when ReinitializeNetwork() runs below. The
+	// wizard applies and saves every preference it collects; it only
+	// hands back which bootstrap files to fetch, since those downloads
+	// need the (not-yet-created) server list and sockets.
+#ifndef AMULE_DAEMON
+	bool firstRunWizardShown = false;
+	bool wizardWantsServerMet = false;
+	bool wizardWantsNodesDat = false;
+	// Gate on the explicit "wizard completed" flag rather than the
+	// inferred first-run flag: a cancelled wizard leaves the flag unset,
+	// so it reappears next launch until the user actually finishes it.
+	if (!thePrefs::IsFirstRunWizardDone()) {
+		// Only offer a bootstrap download when the corresponding data
+		// is actually missing: the wizard can reappear after a cancelled
+		// run (the "done" flag stays unset), and by then the user may
+		// already have populated server.met (probed for real entries,
+		// since a cancelled run leaves an empty one) or nodes.dat.
+		const bool needServerMet = thePrefs::GetNetworkED2K() &&
+					   !ServerMetHasServers(thePrefs::GetConfigDir() + "server.met");
+		const bool needNodesDat = thePrefs::GetNetworkKademlia() &&
+					  !wxFileExists(thePrefs::GetConfigDir() + "nodes.dat");
+
+		FirstRunWizard::Result wiz = FirstRunWizard::Run(NULL, needServerMet, needNodesDat);
+		firstRunWizardShown = true;
+		wizardWantsServerMet = wiz.downloadServerMet;
+		wizardWantsNodesDat = wiz.downloadNodesDat;
+	}
+#endif
+
+	// Validate (and create if needed) the temp / incoming directories.
+	// Deferred to here so the first-run wizard above could redirect them.
+	CPath outDir;
+	if (CheckMuleDirectory("temp", thePrefs::GetTempDir(), thePrefs::GetConfigDir() + "Temp", outDir)) {
+		thePrefs::SetTempDir(outDir);
+	} else {
+		return false;
+	}
+	if (CheckMuleDirectory(
+		    "incoming", thePrefs::GetIncomingDir(), thePrefs::GetConfigDir() + "Incoming", outDir)) {
+		thePrefs::SetIncomingDir(outDir);
+	} else {
+		return false;
 	}
 
 	m_statistics = new CStatistics();
@@ -778,53 +847,84 @@ bool CamuleApp::OnInit()
 	m_app_state = APP_STATE_RUNNING;
 
 	{
-		const bool needServerMet = !serverlist->GetServerCount() && thePrefs::GetNetworkED2K();
-		const bool needNodesDat = thePrefs::GetNetworkKademlia() &&
-					  !wxFileExists(thePrefs::GetConfigDir() + "nodes.dat");
-
-		if (needServerMet || needNodesDat) {
 #ifndef AMULE_DAEMON
-			wxArrayString choices;
-			if (needServerMet)
-				choices.Add(_("eD2k server list (server.met)"));
-			if (needNodesDat)
-				choices.Add(_("Kad bootstrap nodes (nodes.dat)"));
+		if (firstRunWizardShown) {
+			// The first-run wizard already collected the user's
+			// bootstrap choices (and UPnP / port settings, which were
+			// applied before ReinitializeNetwork ran). Act on them now
+			// that the server list and sockets exist.
+			if (wizardWantsServerMet) {
+				serverlist->UpdateServerMetFromURL(thePrefs::GetEd2kServersUrl());
+			}
+			if (wizardWantsNodesDat) {
+				UpdateNotesDat(thePrefs::GetKadNodesUrl());
+			}
+		} else {
+			const bool needServerMet =
+				!serverlist->GetServerCount() && thePrefs::GetNetworkED2K();
+			const bool needNodesDat = thePrefs::GetNetworkKademlia() &&
+						  !wxFileExists(thePrefs::GetConfigDir() + "nodes.dat");
 
-			wxArrayInt defaults;
-			for (size_t i = 0; i < choices.GetCount(); ++i)
-				defaults.Add(i);
+			if (needServerMet || needNodesDat) {
+				// Returning user who is missing a bootstrap file (e.g.
+				// just enabled a network): offer to fetch what's gone.
+				// UPnP / ports live in Preferences for these users, so
+				// this dialog stays focused on the missing files.
+				wxDialog dlg(static_cast<wxWindow *>(theApp->amuledlg),
+					wxID_ANY,
+					_("Network bootstrap"));
+				wxBoxSizer *topSizer = new wxBoxSizer(wxVERTICAL);
 
-			wxMultiChoiceDialog dlg(static_cast<wxWindow *>(theApp->amuledlg),
-				_("aMule has detected missing network bootstrap files.\nSelect which ones to "
-				  "download:"),
-				_("Network bootstrap"),
-				choices);
-			dlg.SetSelections(defaults);
+				topSizer->Add(new wxStaticText(&dlg,
+						      wxID_ANY,
+						      _("aMule has detected missing network bootstrap "
+							"files.\nSelect which ones to download:")),
+					0,
+					wxALL,
+					10);
 
-			if (dlg.ShowModal() == wxID_OK) {
-				const wxArrayInt sel = dlg.GetSelections();
-				int idx = 0;
+				wxCheckBox *serverMetCheck = NULL;
 				if (needServerMet) {
-					if (sel.Index(idx++) != wxNOT_FOUND) {
+					serverMetCheck = new wxCheckBox(
+						&dlg, wxID_ANY, _("eD2k server list (server.met)"));
+					serverMetCheck->SetValue(true);
+					topSizer->Add(serverMetCheck, 0, wxLEFT | wxRIGHT | wxTOP, 10);
+				}
+				wxCheckBox *nodesDatCheck = NULL;
+				if (needNodesDat) {
+					nodesDatCheck = new wxCheckBox(
+						&dlg, wxID_ANY, _("Kad bootstrap nodes (nodes.dat)"));
+					nodesDatCheck->SetValue(true);
+					topSizer->Add(nodesDatCheck, 0, wxLEFT | wxRIGHT | wxTOP, 10);
+				}
+
+				if (wxSizer *btnSizer = dlg.CreateButtonSizer(wxOK | wxCANCEL))
+					topSizer->Add(btnSizer, 0, wxEXPAND | wxALL, 10);
+
+				dlg.SetSizerAndFit(topSizer);
+
+				if (dlg.ShowModal() == wxID_OK) {
+					if (serverMetCheck && serverMetCheck->GetValue()) {
 						serverlist->UpdateServerMetFromURL(
 							thePrefs::GetEd2kServersUrl());
 					}
-				}
-				if (needNodesDat) {
-					if (sel.Index(idx++) != wxNOT_FOUND) {
+					if (nodesDatCheck && nodesDatCheck->GetValue()) {
 						UpdateNotesDat(thePrefs::GetKadNodesUrl());
 					}
 				}
 			}
-#else
-			if (needServerMet) {
-				serverlist->UpdateServerMetFromURL(thePrefs::GetEd2kServersUrl());
-			}
-			if (needNodesDat) {
-				UpdateNotesDat(thePrefs::GetKadNodesUrl());
-			}
-#endif
 		}
+#else
+		const bool needServerMet = !serverlist->GetServerCount() && thePrefs::GetNetworkED2K();
+		const bool needNodesDat = thePrefs::GetNetworkKademlia() &&
+					  !wxFileExists(thePrefs::GetConfigDir() + "nodes.dat");
+		if (needServerMet) {
+			serverlist->UpdateServerMetFromURL(thePrefs::GetEd2kServersUrl());
+		}
+		if (needNodesDat) {
+			UpdateNotesDat(thePrefs::GetKadNodesUrl());
+		}
+#endif
 	}
 
 	// Autoconnect if that option is enabled
@@ -1016,42 +1116,55 @@ bool CamuleApp::ReinitializeNetwork(wxString *msg)
 	}
 
 #ifdef ENABLE_UPNP
-	if (thePrefs::GetUPnPEnabled()) {
-		try {
-			m_upnpMappings[0] = CUPnPPortMapping(myaddr[0].Service(),
-				"TCP",
-				thePrefs::GetUPnPECEnabled(),
-				"aMule TCP External Connections Socket");
-			m_upnpMappings[1] = CUPnPPortMapping(myaddr[1].Service(),
-				"UDP",
-				thePrefs::GetUPnPEnabled(),
-				"aMule UDP socket (TCP+3)");
-			m_upnpMappings[2] = CUPnPPortMapping(myaddr[2].Service(),
-				"TCP",
-				thePrefs::GetUPnPEnabled(),
-				"aMule TCP Listen Socket");
-			m_upnpMappings[3] = CUPnPPortMapping(myaddr[3].Service(),
-				"UDP",
-				thePrefs::GetUPnPEnabled(),
-				"aMule UDP Extended eMule Socket");
-			m_upnp = new CUPnPControlPoint(thePrefs::GetUPnPTCPPort());
-
-			wxStopWatch count; // Wait UPnP service responses for 3s before add port mappings
-			while (count.Time() < 3000 && !m_upnp->WanServiceDetected())
-				;
-
-			m_upnp->AddPortMappings(m_upnpMappings);
-		} catch (CUPnPException &e) {
-			wxString error_msg;
-			error_msg << e.what();
-			AddLogLineC(error_msg);
-			fprintf(stderr, "%s\n", (const char *)unicode2char(error_msg));
-		}
-	}
+	StartUPnP();
 #endif
 
 	return ok;
 }
+
+#ifdef ENABLE_UPNP
+void CamuleApp::StartUPnP()
+{
+	// Nothing to do when UPnP is disabled, and we must never create a
+	// second control point if one already exists (e.g. the first-run
+	// bootstrap dialog enabling UPnP after ReinitializeNetwork() ran).
+	if (!thePrefs::GetUPnPEnabled() || m_upnp) {
+		return;
+	}
+
+	// The mapped ports come straight from the preferences rather than the
+	// listening sockets, so this can run independently of
+	// ReinitializeNetwork() (which owns the local myaddr[] array).
+	try {
+		m_upnpMappings[0] = CUPnPPortMapping(thePrefs::ECPort(),
+			"TCP",
+			thePrefs::GetUPnPECEnabled(),
+			"aMule TCP External Connections Socket");
+		m_upnpMappings[1] = CUPnPPortMapping(thePrefs::GetPort() + 3,
+			"UDP",
+			thePrefs::GetUPnPEnabled(),
+			"aMule UDP socket (TCP+3)");
+		m_upnpMappings[2] = CUPnPPortMapping(
+			thePrefs::GetPort(), "TCP", thePrefs::GetUPnPEnabled(), "aMule TCP Listen Socket");
+		m_upnpMappings[3] = CUPnPPortMapping(thePrefs::GetUDPPort(),
+			"UDP",
+			thePrefs::GetUPnPEnabled(),
+			"aMule UDP Extended eMule Socket");
+		m_upnp = new CUPnPControlPoint(thePrefs::GetUPnPTCPPort());
+
+		wxStopWatch count; // Wait UPnP service responses for 3s before add port mappings
+		while (count.Time() < 3000 && !m_upnp->WanServiceDetected())
+			;
+
+		m_upnp->AddPortMappings(m_upnpMappings);
+	} catch (CUPnPException &e) {
+		wxString error_msg;
+		error_msg << e.what();
+		AddLogLineC(error_msg);
+		fprintf(stderr, "%s\n", (const char *)unicode2char(error_msg));
+	}
+}
+#endif
 
 /* Original implementation by Bouc7 of the eMule Project.
    aMule Signature idea was designed by BigBob and implemented

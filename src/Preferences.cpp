@@ -80,6 +80,8 @@ CPreferences::CFGMap CPreferences::s_CfgList;
 CPreferences::CFGList CPreferences::s_MiscList;
 
 wxString CPreferences::s_configDir;
+bool CPreferences::s_firstRun = false;
+bool CPreferences::s_firstRunWizardDone = false;
 
 /* Proxy */
 CProxyData CPreferences::s_ProxyData;
@@ -994,6 +996,30 @@ CPreferences::CPreferences()
 
 	// load preferences.dat or set standard values
 	wxString fullpath(s_configDir + "preferences.dat");
+
+	// Capture the first-run state before we (possibly) create
+	// preferences.dat below: the absence of that file marks a fresh
+	// install, which the GUI uses to decide whether to show the
+	// first-run setup wizard. Done in the monolithic/daemon core only;
+	// the remote GUI compiles CLIENT_GUI and keeps the default false.
+#ifndef CLIENT_GUI
+	s_firstRun = !wxFileExists(fullpath);
+
+	// Migration for installs that predate the explicit first-run flag:
+	// they have a populated config but no /eMule/FirstRunWizardDone
+	// entry. Mark the wizard as already done for them so it never
+	// retroactively pops up. A genuine fresh install (no preferences.dat)
+	// is left alone, so the wizard runs once and then persists its own
+	// flag via FirstRunWizard::Apply(). LoadAllItems() has already run by
+	// this point, so the entry is the authoritative signal.
+	if (!s_firstRun) {
+		wxConfigBase *cfg = wxConfigBase::Get();
+		if (cfg && !cfg->HasEntry("/eMule/FirstRunWizardDone")) {
+			s_firstRunWizardDone = true;
+		}
+	}
+#endif
+
 	CFile preffile;
 	if (wxFileExists(fullpath)) {
 		if (preffile.Open(fullpath, CFile::read)) {
@@ -1318,6 +1344,7 @@ void CPreferences::BuildItemList(const wxString &appdir)
 	s_MiscList.push_back(new Cfg_Bool("/eMule/MessageUseCaptchas", s_IsChatCaptchaEnabled, true));
 	s_MiscList.push_back(
 		new Cfg_Bool("/GUI/AppImageIntegrationDeclined", s_appimageIntegrationDeclined, false));
+	s_MiscList.push_back(new Cfg_Bool("/eMule/FirstRunWizardDone", s_firstRunWizardDone, false));
 
 	NewCfgItem(IDC_FILTERCOMMENTS, (new Cfg_Bool("/eMule/FilterComments", s_FilterComments, false)));
 	NewCfgItem(IDC_COMMENTWORD, (new Cfg_Str("/eMule/CommentFilter", s_CommentFilterString, "")));
