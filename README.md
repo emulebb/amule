@@ -4,6 +4,12 @@
 
 aMule is an eMule-like client for the eDonkey and Kademlia networks.
 
+> **eMuleBB fork notice:** `emulebb/amule` is retained primarily for source
+> analysis, compatibility reference, and automated build evidence. It is not an
+> eMuleBB product or roadmap lane. The maintained upstream project is
+> [`amule-org/amule`](https://github.com/amule-org/amule); this fork's existing
+> automation remains active by design.
+
 [Forum] | [Documentation] | [FAQ]
 
 [Forum]:         https://github.com/amule-org/amule/discussions "aMule Forum"

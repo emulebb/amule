@@ -8,9 +8,10 @@
 
 Everything below is this repo's local deltas only:
 
-- This is the aMule compatibility client used by mixed-client live suites, not a
-  shipped eMuleBB product. Treat it as a stock-compatible reference peer and keep
-  protocol behavior aligned with stock eD2K/Kad semantics.
+- This is an aMule analysis/reference fork, not a shipped eMuleBB product or
+  roadmap lane. Existing automation remains active. Treat it as a
+  stock-compatible reference peer and keep protocol behavior aligned with stock
+  eD2K/Kad semantics.
 - BUILD OUTPUT: orchestrated builds land under
   `%EMULEBB_WORKSPACE_OUTPUT_ROOT%\builds\amule`; never write build output into
   this source tree or anywhere under `c:\prj`. Drive builds through
